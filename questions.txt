@@ -1,0 +1,90 @@
+No Zig, não existe um alocador global escondido: você sempre escolhe e passa o `Allocator` explicitamente, e a responsabilidade de liberar ou limpar a memória é sempre sua.
+
+Aqui estão **5 exercícios progressivos** desenhados para você praticar os conceitos reais do dia a dia em Zig — desde o básico de `alloc`/`free` até o uso de arenas e detecção de vazamentos (*memory leaks*).
+
+---
+
+### Exercício 1: O Ciclo Básico e `defer`
+
+**Objetivo:** Entender `alloc`, `free` e a garantia de limpeza com `defer`, além de usar o `GeneralPurposeAllocator` (GPA) para detectar vazamentos.
+
+**Desafio:**
+
+1. Crie uma função `criarSequencia(allocator: std.mem.Allocator, tamanho: usize) ![]usize` que aloca um *slice* dinâmico do tamanho pedido e preenche cada índice `i` com o valor `i * 2`.
+2. No `main`, instancie um `std.heap.GeneralPurposeAllocator(.{}){}`.
+3. Use `defer _ = gpa.deinit();` logo após instanciá-lo — isso fará o Zig imprimir um aviso no terminal se você esquecer de dar `free` em algo.
+4. Chame sua função, imprima os valores e lembre-se de liberar o *slice* retornado.
+5. **Teste de validação:** Comente a linha do `allocator.free(...)` de propósito, rode o programa e veja o relatório de *leak* que o GPA gera. Depois descomente.
+
+---
+
+### Exercício 2: Strings Dinâmicas e `errdefer`
+
+**Objetivo:** Aprender a lidar com falhas no meio de múltiplas alocações usando `errdefer`.
+
+**Desafio:**
+Crie uma `struct Usuario` contendo `nome: []u8` e `email: []u8`. Escreva uma função construtora:
+
+```zig
+fn criarUsuario(allocator: std.mem.Allocator, nome: []const u8, email: []const u8) !Usuario
+
+```
+
+1. Dentro dela, use `allocator.dupe(u8, ...)` para copiar tanto o `nome` quanto o `email` para a *heap*.
+2. **O detalhe crucial:** Se a alocação de `nome` funcionar, mas a alocação de `email` falhar (por falta de memória), o `nome` já alocado vazaria! Use `errdefer allocator.free(nome_alocado);` logo após alocar o nome para garantir que ele só seja liberado caso a função retorne um erro.
+3. Crie também um método `deinit(self: Usuario, allocator: std.mem.Allocator) void` na `struct` para liberar ambos os campos.
+
+---
+
+### Exercício 3: Alocação na Stack vs. Heap (`FixedBufferAllocator`)
+
+**Objetivo:** Trabalhar com memória dinâmica sem tocar na *heap* do sistema operacional (muito comum em sistemas embarcados ou código de alta performance).
+
+**Desafio:**
+
+1. Crie um *array* simples na *stack*: `var buffer: [256]u8 = undefined;`.
+2. Inicialize um `std.heap.FixedBufferAllocator.init(&buffer)` e pegue o `allocator` dele.
+3. Tente alocar um `std.ArrayList(i32)` usando esse alocador e vá adicionando números em um *loop* (`try lista.append(...)`) até estourar os 256 bytes.
+4. Capture o erro `error.OutOfMemory` usando `catch` e imprima quantos itens couberam antes da memória acabar.
+
+---
+
+### Exercício 4: O Padrão `ArenaAllocator`
+
+**Objetivo:** Aprender a gerenciar múltiplas pequenas alocações que têm o mesmo tempo de vida e liberá-las todas de uma vez.
+
+**Desafio:**
+Imagine que você está lendo várias linhas de texto e quebrando cada linha em palavras.
+
+1. Crie uma função `processarTexto(backing_allocator: std.mem.Allocator, texto: []const u8) !void`.
+2. Dentro dela, crie um `std.heap.ArenaAllocator.init(backing_allocator)` e coloque `defer arena.deinit();` imediatamente.
+3. Usando `const alloc = arena.allocator();`, use `std.mem.splitScalar(u8, texto, ' ')` para iterar pelas palavras, duplique cada palavra em maiúsculo (alocando na arena) e guarde-as em um `ArrayList([]u8)`.
+4. Note que você **não precisa** dar `free` em cada palavra individualmente nem chamar `lista.deinit()` — o `arena.deinit()` varre tudo de uma vez ao sair da função. Confirme com o GPA no `main` que zero bytes vazaram.
+
+---
+
+### Exercício 5: Implementando um Pequeno `Ring Buffer` (Buffer Circular)
+
+**Objetivo:** Juntar ponteiros/índices, aritmética modular e gerenciamento manual de memória dentro de uma estrutura de dados própria.
+
+**Desafio:**
+Implemente uma `struct RingBuffer(comptime T: type)` que guarda uma capacidade fixa definida em tempo de execução:
+
+* `init(allocator: std.mem.Allocator, capacidade: usize) !RingBuffer(T)`: aloca o *slice* interno de `T`.
+* `deinit(self: *RingBuffer(T), allocator: std.mem.Allocator) void`: libera o *slice* interno.
+* `push(self: *RingBuffer(T), item: T) void`: insere um item; se o buffer estiver cheio, sobrescreve o item mais antigo.
+* `pop(self: *RingBuffer(T)) ?T`: remove e retorna o item mais antigo, ou `null` se estiver vazio.
+
+---
+
+### Dicas Rápidas de Sintaxe (Zig 0.13 / 0.14+)
+
+* Para criar e inicializar um `ArrayList`:
+```zig
+var lista = std.ArrayList(i32).init(allocator);
+defer lista.deinit();
+
+```
+
+
+* Para testar falhas de alocação de forma determinística (ótimo para validar o **Exercício 2**), você pode usar `std.testing.FailingAllocator` dentro de um bloco `test "..." { ... }` e rodar com `zig test seu_arquivo.zig`.
