@@ -7,6 +7,7 @@ pub fn main() !void {
 
     // const allocator = gpa.allocator();
     var buffer: [256]u8 = undefined;
+    // O alocador desse cara tem uma quantidade máxima que pode disponibilizar
     var gpa = std.heap.FixedBufferAllocator.init(&buffer);
 
     const allocator = gpa.allocator();
